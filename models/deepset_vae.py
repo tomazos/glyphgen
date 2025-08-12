@@ -186,28 +186,40 @@ class DeepSetVAE(nn.Module):
         mask = batch["mask"]      # [B,K,L]
         B, K, L, _ = points.shape
 
+        # --- Encode ---
         mu, logvar, e_contour = self.encode(points, mask)
-        z = self.reparameterize(mu, logvar)
-        delta = self.decode(z, e_contour, L, mask)
+
+        # Compute KL in float32 and clamp logvar to avoid exp overflow
+        mu32 = mu.float()
+        logvar32 = logvar.float().clamp_(-8.0, 8.0)  # clamp keeps std in [~0.018, ~2.98]
+
+        # --- Sample --- (keep z in fp32, cast to points.dtype for decode)
+        z = self.reparameterize(mu32, logvar32)          # fp32 sample
+        z_cast = z.to(points.dtype)                      # cast for decoder
+
+        # --- Decode ---
+        delta = self.decode(z_cast, e_contour, L, mask)
         recon = points + delta
 
-        # Losses
+        # --- Losses ---
         m = mask.unsqueeze(-1).to(points.dtype)
-        l1 = (m * (recon - points).abs()).sum() / (m.sum().clamp_min(1.0))
-        kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / B  # per-batch avg
+        l1 = (m * (recon - points).abs()).sum() / m.sum().clamp_min(1.0)
+
+        # KL per sample in fp32
+        kl_per = -0.5 * (1.0 + logvar32 - mu32.pow(2) - logvar32.exp()).sum(dim=1)
+        kl = kl_per.mean()
         total = l1 + self.beta_kl * kl
 
         return {
             "recon": recon,
             "delta": delta,
-            "mu": mu,
-            "logvar": logvar,
+            "mu": mu32,
+            "logvar": logvar32,
             "z": z,
             "loss_total": total,
             "loss_l1": l1,
             "loss_kl": kl,
         }
-
 
 # ------------------------------------------------------------
 # Quick shape/grad check when run directly
