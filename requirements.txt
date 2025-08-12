@@ -1,0 +1,15 @@
+# Core
+torch
+numpy>=1.24
+
+# Utils & CLI
+tqdm
+rich>=13.7
+psutil
+
+# Config (optional now; used from Milestone 4)
+hydra-core>=1.3
+PyYAML>=6.0
+
+# Viz (optional, handy for previews)
+matplotlib
